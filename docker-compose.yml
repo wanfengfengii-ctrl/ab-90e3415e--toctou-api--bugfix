@@ -1,0 +1,81 @@
+# 档案装裱排版校验台 —— 容器编排
+#
+# 应用组件只有两个：
+#   web  前端（nginx 托管 React 构建产物并反代 /api）
+#   api  FastAPI + SQLAlchemy 裁决/落库服务
+# db 是 PostgreSQL 支撑服务；verify 是一次性验收服务（profile: verify）。
+#
+# 宿主端口可用环境变量覆盖：
+#   WEB_PORT=9090 API_PORT=9000 docker compose up
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: matboard
+      POSTGRES_PASSWORD: matboard
+      POSTGRES_DB: matboard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matboard -d matboard"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://matboard:matboard@db:5432/matboard
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status==200 else 1)",
+        ]
+      interval: 3s
+      timeout: 4s
+      retries: 20
+      start_period: 5s
+
+  web:
+    build: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    healthcheck:
+      # 用 IPv4 字面量，避免 busybox wget 把 localhost 解析到 ::1 而拒连
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 3s
+      timeout: 4s
+      retries: 20
+      start_period: 5s
+
+  # 一次性端到端验收：对运行中的 api 与 web 反代打真实 HTTP 请求。
+  # 运行：docker compose run --rm verify
+  verify:
+    profiles: ["verify"]
+    image: python:3.12-slim
+    working_dir: /verify
+    command: ["python", "/verify/verify.py"]
+    volumes:
+      - ./verify:/verify:ro
+    environment:
+      API_URL: http://api:8000
+      WEB_URL: http://web
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+volumes:
+  pgdata:

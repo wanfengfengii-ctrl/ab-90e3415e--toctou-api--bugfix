@@ -1,0 +1,13 @@
+# 前端
+node_modules/
+frontend/dist/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# 环境/编辑器
+.env
+.DS_Store
