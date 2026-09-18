@@ -78,6 +78,20 @@ pip install -r requirements.txt -r requirements-dev.txt
 pytest
 ```
 
+并发启动迁移回归（多个 API 实例同时升级同一旧库，复现 TOCTOU 导致的
+DuplicateColumn；无 PostgreSQL 时自动跳过，仅保留 SQLite 并发用例）。
+对 compose 栈跑这一组：用例在库内创建随机命名的隔离 schema，结束时
+DROP CASCADE，不触碰其他数据：
+
+```bash
+docker compose up --build -d
+docker compose run --rm \
+  -v "$PWD/backend:/app" -w /app \
+  -e TEST_DATABASE_URL=postgresql+psycopg2://matboard:matboard@db:5432/matboard \
+  api sh -c "pip install -q -r requirements-dev.txt && \
+             pytest tests/test_migrate_concurrency.py"
+```
+
 前端：
 
 ```bash
