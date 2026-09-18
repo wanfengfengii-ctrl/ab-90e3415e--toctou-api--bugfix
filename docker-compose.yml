@@ -77,5 +77,21 @@ services:
       web:
         condition: service_healthy
 
+  # 一次性并发迁移回归：在 db 的隔离 schema 中造旧版表，让两个/五个
+  # 独立连接同时执行真实 run_migrations，复现并验证 TOCTOU 修复。
+  # 运行：docker compose run --rm verify-migration
+  verify-migration:
+    profiles: ["verify"]
+    build: ./backend
+    working_dir: /app
+    command: ["python", "/verify/migrate_concurrency.py"]
+    volumes:
+      - ./verify:/verify:ro
+    environment:
+      DATABASE_URL: postgresql+psycopg2://matboard:matboard@db:5432/matboard
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:

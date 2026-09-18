@@ -68,6 +68,26 @@ docker compose run --rm verify
 
 全部断言通过时退出码为 0。
 
+### 并发启动迁移回归
+
+多个 API 实例同时启动、升级同一旧库时，启动迁移必须并发幂等。
+`verify-migration` 在 db 的**隔离 schema**（跑完即删，不碰业务表）中造
+缺少 `windows.label` / `layouts.grid_step` 的旧版表，让两个独立连接
+（在首条 ALTER 前同步）与五个独立连接分别同时执行真实 `run_migrations`，
+断言全部实例成功、每个新增列恰好出现一次、历史行保留：
+
+```bash
+docker compose run --rm verify-migration
+```
+
+同样的复现路径也在后端 pytest 中（`tests/test_migrate_concurrency.py`），
+默认 SQLite 套件下自动跳过；指向 PostgreSQL 时运行：
+
+```bash
+MIGRATION_TEST_DATABASE_URL='postgresql+psycopg2://matboard:matboard@localhost:5432/matboard' \
+  pytest backend/tests/test_migrate_concurrency.py
+```
+
 ## 本地运行测试
 
 后端（裁决引擎为纯函数；API 测试用 SQLite 内存库跑同样的模型与路由）：
@@ -144,11 +164,12 @@ npm run dev       # 本地开发（/api 代理到 localhost:8000）
 .
 ├── docker-compose.yml      # web / api 两个应用 + db + 一次性 verify
 ├── verify/verify.py        # 端到端验收脚本（纯标准库）
+├── verify/migrate_concurrency.py  # 并发启动迁移回归（隔离 schema，compose 一次性服务）
 ├── backend/                # FastAPI + SQLAlchemy
 │   ├── app/engine.py       # 裁决引擎（半开矩形、逐字段校验、瑕疵区常量）
 │   ├── app/validation.py   # 原始 JSON 整数校验（拒绝 3.5 / "5" / true）与编号校验
-│   ├── app/migrate.py      # 启动时的幂等轻量迁移（为旧库补 windows.label、layouts.grid_step 列）
-│   └── tests/              # pytest
+│   ├── app/migrate.py      # 启动迁移（咨询锁串行化，为旧库并发安全地补 windows.label、layouts.grid_step 列）
+│   └── tests/              # pytest（含 PostgreSQL 并发迁移回归 test_migrate_concurrency.py）
 └── frontend/               # React + Vite
     ├── src/geometry.js     # 与引擎同构的前端镜像（即时预览，后端为准）
     └── src/__tests__/      # Vitest
